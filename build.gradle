@@ -1,4 +1,5 @@
 import sun.applet.Main
+import org.apache.tools.ant.filters.ReplaceTokens
 
 apply plugin: 'java'
 apply plugin: 'idea'
@@ -15,6 +16,26 @@ task wrapper(type: Wrapper) {
 
 repositories {
     mavenCentral()
+}
+
+task copyResources(type: Copy) {
+    from ('src') {
+        include 'org/**/*.properties'
+    }
+    into {
+        new File(buildDir, '/classes/main')
+    }
+    filter(ReplaceTokens, tokens: ['IMPLEMENTATION.VERSION': 'Rhino ' + project.version])
+}
+
+processResources.doLast {
+    copyResources.execute()
+}
+
+afterEvaluate {
+  configure(processResources) {
+    filter(ReplaceTokens, tokens: ['IMPLEMENTATION.VERSION': project.version])
+  }
 }
 
 sourceSets {
