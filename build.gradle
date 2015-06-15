@@ -3,6 +3,7 @@ import sun.applet.Main
 apply plugin: 'java'
 apply plugin: 'idea'
 apply plugin: 'maven-publish'
+apply plugin: 'signing'
 
 sourceCompatibility = 1.6
 targetCompatibility = 1.6
@@ -106,8 +107,75 @@ task rhinoJavadocJar(type: Jar, dependsOn: rhinoJavadoc) {
     from rhinoJavadoc.destinationDir
 }
 
+ext {
+    pomFilePath = "${buildDir}/tmp/pom.xml"
+    pomFile = file(pomFilePath)
+}
+
+configurations {
+    pom
+}
+
+artifacts {
+    archives jar
+    archives sourceJar
+    archives rhinoJavadocJar
+    if (pomFile.exists()) {
+        pom pomFile
+    }
+}
+
+task signJars (type : Sign, dependsOn: [ jar, sourceJar, rhinoJavadocJar ]) {
+    sign configurations.archives
+}
+
+task signPom(type: Sign, dependsOn: [ generatePomFileForRhinoPublication ]) {
+    sign project.ext.pomFile
+}
+
+/*
+if (project.ext.pomFile.exists()) {
+    task preparePublication (dependsOn : [signJars, signPom])
+} else {
+    task preparePublication (dependsOn : signJars)
+}
+*/
+task preparePublication (dependsOn : [signJars, signPom])
+
+/*
+ * Thanks to "mike" for lots of examples of how to do proper Maven publication using Gradle:
+ * http://mike-neck.github.io/blog/2013/06/21/how-to-publish-artifacts-with-gradle-maven-publish-plugin-version-1-dot-6/
+ */
+
+def getSignatureFiles = {
+    def pomFile = project.tasks.signPom.signatureFiles.collect{it}[0]
+    def allFiles = project.tasks.signJars.signatureFiles.collect { it }
+    def signedSources = allFiles.find { it.name.contains('-sources') }
+    def signedJavadoc = allFiles.find { it.name.contains('-javadoc') }
+    def signedJar = (allFiles - [signedSources, signedJavadoc])[0]
+    return [
+            [archive: signedPom, classified: 'pom', extension: 'pom.asc'],
+            [archive: signedSources, classifier: 'sources', extension: 'jar.asc'],
+            [archive: signedJavadoc, classifier: 'javadoc', extension: 'jar.asc'],
+            [archive: signedJar,     classifier: null,      extension: 'jar.asc']
+    ]
+}
+
+def getPomSignature = {
+    return project.tasks.signPom.signatureFiles.collect{it}[0]
+}
+
 publishing {
     publications {
+
+        if (project.ext.pomFile.exists()) {
+            gpgPom(MavenPublication) {
+                artifact (getPomSignature()) {
+                    classifier = null
+                    extension  = 'pom.asc'
+                }
+            }
+        }
         rhino(MavenPublication) {
             pom.withXml {
                 def root = asNode()
@@ -117,6 +185,11 @@ publishing {
     It is typically embedded into Java applications to provide scripting to end users.
 """)
                 root.appendNode("url", "https://developer.mozilla.org/en/Rhino")
+
+                def p = root.appendNode("parent")
+                p.appendNode("groupId", "org.sonatype.oss")
+                p.appendNode("artifactId", "oss-parent")
+                p.appendNode("version", "7")
 
                 def l = root.appendNode("licenses").appendNode("license")
                 l.appendNode("name", "Mozilla Public License, Version 2.0")
@@ -131,6 +204,11 @@ publishing {
                 o.appendNode("name", "The Mozilla Foundation")
                 o.appendNode("url", "http://www.mozilla.org")
 
+                /*
+                if (!project.ext.pomFile.exists()) {
+                    writeTo (project.ext.pomFile)
+                }
+                */
             }
             from components.java
             artifact sourceJar {
@@ -140,6 +218,16 @@ publishing {
                 classifier "javadoc"
             }
         }
+
+        gpgJars(MavenPublication) {
+            getSignatureFiles().each {signature ->
+                artifact (signature.archive) {
+                    classifier = signature.classifier
+                    extension  = signature.extension
+                }
+            }
+        }
+
     }
 
     if (project.hasProperty("mavenPassword")) {
@@ -150,9 +238,9 @@ publishing {
                     password mavenPassword
                 }
                 if (project.version.endsWith('-SNAPSHOT')) {
-                    url mavenSnapshotRepo
+                    url "https://oss.sonatype.org/content/repositories/snapshots"
                 } else {
-                    url mavenReleaseRepo
+                    url "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
                 }
             }
         }
