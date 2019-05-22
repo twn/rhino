@@ -92,7 +92,7 @@ public final class JavaAdapter implements IdFunctionCall
             for (iter.start(); !iter.done(); iter.next()) {
                 String name = (String)iter.getKey();
                 int arity = iter.getValue();
-                if (arity != names.get(name, arity + 1))
+                if (arity != sig.names.get(name, arity + 1))
                     return false;
             }
             return true;
@@ -101,8 +101,7 @@ public final class JavaAdapter implements IdFunctionCall
         @Override
         public int hashCode()
         {
-            return superClass.hashCode()
-                | (0x9e3779b9 * (names.size() | (interfaces.length << 16)));
+            return (superClass.hashCode() + Arrays.hashCode(interfaces)) ^ names.size();
         }
     }
 
